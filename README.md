@@ -3,6 +3,8 @@
 TruthLens is an intelligent, real-time web application that analyzes news text for credibility using both AI models and custom heuristics.  
 Built in under 3 hours for the Code Crafter AI Challenge, TruthLens won 🥇 **First Place**, thanks to its hybrid approach, seamless frontend, and secure backend design.
 
+You can check me out @  https://truth-lens-1-psmo.onrender.com/  😌😊
+
 ---
 
 ##  Key Features
