@@ -1,30 +1,30 @@
-# 🧠 TruthLens — AI-Powered Fake News Detection Web App
+#  TruthLens — AI-Powered Fake News Detection Web App
 
 TruthLens is an intelligent, real-time web application that analyzes news text for credibility using both AI models and custom heuristics.  
 Built in under 3 hours for the Code Crafter AI Challenge, TruthLens won 🥇 **First Place**, thanks to its hybrid approach, seamless frontend, and secure backend design.
 
 ---
 
-## 🚀 Key Features
+##  Key Features
 
-✅ Paste any news paragraph for instant analysis  
-🧠 Multi-model AI ensemble powered by Hugging Face APIs:
+Paste any news paragraph for instant analysis  
+Multi-model AI ensemble powered by Hugging Face APIs:
 - Detects misleading or toxic language  
 - Classifies sentiment and emotional bias  
 
-📊 Hybrid scoring algorithm combining:
+ Hybrid scoring algorithm combining:
 - AI inference results  
 - Rule-based pattern matching  
 - Heuristic credibility metrics  
 
-🔎 Plain-English explanation of red flags or trust signals  
-🌐 Responsive web interface (HTML + JS) + Flask backend (Python)  
-🔒 Secure token handling and API validation  
-🧪 `/check`, `/bulk`, and `/health` endpoints for testing and API integration
+Plain-English explanation of red flags or trust signals  
+Responsive web interface (HTML + JS) + Flask backend (Python)  
+Secure token handling and API validation  
+`/check`, `/bulk`, and `/health` endpoints for testing and API integration
 
 ---
 
-## 🧠 AI & NLP Stack
+##  AI & NLP Stack
 
 TruthLens uses a weighted ensemble of pre-trained transformer models, plus handcrafted rules, to mimic how humans assess news credibility:
 
@@ -50,7 +50,7 @@ Each model is accessed via Hugging Face’s hosted inference API, with error-han
 
 ---
 
-## 📦 Endpoints
+##  Endpoints
 
 | Route             | Method | Description                          |
 |-------------------|--------|--------------------------------------|
@@ -62,7 +62,7 @@ Each model is accessed via Hugging Face’s hosted inference API, with error-han
 
 ---
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 - **Backend:** Python, Flask, Requests, Hugging Face Inference API  
 - **Frontend:** HTML5, CSS3, JavaScript (Vanilla)  
