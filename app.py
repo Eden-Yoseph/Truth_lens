@@ -1,414 +1,610 @@
+"""
+TruthLens AI
+fake news detection API with multi-model analysis,
+calibrated scoring, and robust error handling.
+"""
+
 from flask import Flask, render_template, request, jsonify
-import requests
-import json
-import os
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Optional
+import requests
+import logging
 import time
 import re
-from typing import Dict, List, Tuple, Optional
-import logging
-from datetime import datetime
+import os
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# ─────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("truthlens")
 
+
+# ─────────────────────────────────────────────
+# Config
+# ─────────────────────────────────────────────
+@dataclass(frozen=True)
+class Config:
+    HF_API_TOKEN: str = os.getenv("HF_API_TOKEN", "")
+    HF_API_URL: str = "https://api-inference.huggingface.co/models/"
+    MAX_TEXT_LENGTH: int = 2000
+    REQUEST_TIMEOUT: int = 30
+    MAX_RETRIES: int = 3
+    RATE_LIMIT_DEFAULT: str = "30 per minute"
+    RATE_LIMIT_BULK: str = "5 per minute"
+
+
+cfg = Config()
+
+
+# ─────────────────────────────────────────────
+# Flask app + extensions
+# ─────────────────────────────────────────────
 app = Flask(__name__)
 CORS(app)
 
-# Configuration class for better organization
-class Config:
-    HF_API_TOKEN = os.getenv("HF_API_TOKEN")
-    HF_API_URL = "https://api-inference.huggingface.co/models/"
-    MAX_TEXT_LENGTH = 2000
-    REQUEST_TIMEOUT = 30
-    MAX_RETRIES = 3
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=[cfg.RATE_LIMIT_DEFAULT],
+    storage_uri="memory://",
+)
 
-# Models configuration with metadata
-MODELS = {
-    "primary": {
+
+# ─────────────────────────────────────────────
+# Model registry
+# ─────────────────────────────────────────────
+
+MODELS: dict[str, dict] = {
+    "toxicity": {
         "name": "martin-ha/toxic-comment-model",
         "purpose": "toxicity_detection",
-        "weight": 0.4
     },
-    "secondary": {
+    "sentiment": {
         "name": "cardiffnlp/twitter-roberta-base-sentiment-latest",
-        "purpose": "sentiment_analysis", 
-        "weight": 0.3
+        "purpose": "sentiment_analysis",
     },
-    "backup": {
-        "name": "microsoft/DialoGPT-medium",
-        "purpose": "fallback",
-        "weight": 0.3
-    }
 }
 
-# Comprehensive fake news indicators
-FAKE_NEWS_PATTERNS = {
-    "clickbait_phrases": [
-        "you won't believe", "doctors hate this", "secret that", "they don't want you to know",
-        "shocking truth", "incredible discovery", "amazing breakthrough", "miracle cure",
-        "scientists baffled", "experts shocked", "unbelievable results", "this will blow your mind",
-        "click here", "find out", "you'll never guess", "what happens next",
-        "number 7 will shock you", "the result will surprise you"
-    ],
-    "sensational_words": [
-        "amazing", "incredible", "shocking", "unbelievable", "miraculous", "revolutionary",
-        "breakthrough", "exclusive", "leaked", "exposed", "revealed", "secret"
-    ],
-    "emotional_triggers": [
-        "outraged", "disgusted", "terrified", "heartbroken", "devastated", "furious"
-    ]
-}
 
-# Sample texts for frontend
-SAMPLE_TEXTS = {
-    "real": "The UAE government announced new regulations for artificial intelligence development in the country, focusing on ethical AI practices and data privacy protection. The initiative aims to position the UAE as a global leader in responsible AI innovation.",
-    "fake": "Scientists have discovered that drinking coffee backwards (spitting it out instead of swallowing) can increase lifespan by 200% according to a study conducted by the International Institute of Reverse Nutrition.",
-    "unclear": "A new study suggests that people who eat chocolate daily may have better memory, though the research sample was small and the funding source was not disclosed."
-}
+# ─────────────────────────────────────────────
+# Fake-news linguistic indicators
+# ─────────────────────────────────────────────
+CLICKBAIT_PHRASES: list[str] = [
+    "you won't believe", "doctors hate this", "secret that",
+    "they don't want you to know", "shocking truth", "incredible discovery",
+    "amazing breakthrough", "miracle cure", "scientists baffled",
+    "experts shocked", "unbelievable results", "this will blow your mind",
+    "you'll never guess", "what happens next", "number \d+ will shock you",
+    "the result will surprise you", "click here to find out",
+]
+SENSATIONAL_WORDS: list[str] = [
+    "amazing", "incredible", "shocking", "unbelievable", "miraculous",
+    "revolutionary", "breakthrough", "exclusive", "leaked", "exposed",
+    "revealed", "secret",
+]
+EMOTIONAL_TRIGGERS: list[str] = [
+    "outraged", "disgusted", "terrified", "heartbroken", "devastated", "furious",
+]
 
-class NewsAnalyzer:
-    """Centralized news analysis logic"""
-    
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({
-            "Content-Type": "application/json"
-        })
-        if Config.HF_API_TOKEN:
-            self.session.headers.update({
-                "Authorization": f"Bearer {Config.HF_API_TOKEN}"
-            })
-    
-    def call_huggingface_api(self, model_key: str, text: str) -> Optional[Dict]:
-        """Enhanced API call with better error handling"""
-        model_info = MODELS[model_key]
-        url = f"{Config.HF_API_URL}{model_info['name']}"
-        payload = {"inputs": text}
-        
-        for attempt in range(Config.MAX_RETRIES):
+# Pre-compile regex patterns for performance
+_CLICKBAIT_RE = re.compile(
+    "|".join(CLICKBAIT_PHRASES), flags=re.IGNORECASE
+)
+_CAPS_WORD_RE = re.compile(r'\b[A-Z]{3,}\b')
+_REPEATED_CHAR_RE = re.compile(r'(.)\1{2,}')
+_EXCESSIVE_PUNCT_RE = re.compile(r'[!?]{2,}')
+_URL_RE = re.compile(
+    r'https?://(?:[a-zA-Z0-9$\-_.+!*\'(),]|(?:%[0-9a-fA-F]{2}))+'
+)
+_MENTION_RE = re.compile(r'@\w+')
+_SENTENCE_END_RE = re.compile(r'[.!?]+')
+
+
+# ─────────────────────────────────────────────
+# Result dataclasses
+# ─────────────────────────────────────────────
+@dataclass
+class AIResult:
+    toxicity_score: float = 0.0
+    toxicity_label: str = "unknown"
+    sentiment_label: str = "neutral"
+    sentiment_score: float = 0.0
+    # True when the sentiment confidence is extreme (regardless of polarity)
+    extreme_sentiment: bool = False
+    models_called: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class TextFeatures:
+    word_count: int = 0
+    sentence_count: int = 0
+    avg_word_length: float = 0.0
+    exclamation_marks: int = 0
+    question_marks: int = 0
+    quote_count: int = 0
+    all_caps_words: int = 0
+    repeated_chars: int = 0
+    excessive_punct: int = 0
+    url_count: int = 0
+    mention_count: int = 0
+    clickbait_matches: int = 0
+    sensational_word_count: int = 0
+    emotional_trigger_count: int = 0
+
+
+@dataclass
+class CredibilityResult:
+    score: float           # 0–100, higher = more credible
+    label: str             # CREDIBLE | SUSPICIOUS | UNCERTAIN
+    confidence: float      # 0–100
+    risk_factors: list[str]
+    positive_factors: list[str]
+    timestamp: str
+
+
+# ─────────────────────────────────────────────
+# HuggingFace API client
+# ─────────────────────────────────────────────
+class HFClient:
+    """Thin, stateless wrapper around the HuggingFace Inference API."""
+
+    def __init__(self) -> None:
+        self._session = requests.Session()
+        self._session.headers.update({"Content-Type": "application/json"})
+        if cfg.HF_API_TOKEN:
+            self._session.headers["Authorization"] = f"Bearer {cfg.HF_API_TOKEN}"
+
+    def query(self, model_key: str, text: str) -> Optional[list | dict]:
+        """
+        Call a HuggingFace classification model.
+        Returns the raw JSON on success, None on failure.
+        """
+        model_name = MODELS[model_key]["name"]
+        url = f"{cfg.HF_API_URL}{model_name}"
+
+        for attempt in range(cfg.MAX_RETRIES):
             try:
-                response = self.session.post(
-                    url, 
-                    json=payload, 
-                    timeout=Config.REQUEST_TIMEOUT
+                resp = self._session.post(
+                    url,
+                    json={"inputs": text},
+                    timeout=cfg.REQUEST_TIMEOUT,
                 )
-                
-                if response.status_code == 200:
-                    logger.info(f"Successful API call to {model_key}")
-                    return response.json()
-                elif response.status_code == 503:
-                    wait_time = 2 ** attempt
-                    logger.warning(f"Model loading, waiting {wait_time}s")
-                    time.sleep(wait_time)
+                if resp.status_code == 200:
+                    logger.info("HF call OK: model=%s", model_key)
+                    return resp.json()
+
+                if resp.status_code == 503:
+                    wait = 2 ** attempt
+                    logger.warning("Model loading (%s), retry in %ds", model_key, wait)
+                    time.sleep(wait)
                     continue
-                else:
-                    logger.error(f"API Error {response.status_code}: {response.text}")
-                    return None
-                    
-            except requests.exceptions.Timeout:
-                logger.warning(f"Request timeout on attempt {attempt + 1}")
-                if attempt < Config.MAX_RETRIES - 1:
-                    time.sleep(1)
-                    continue
-            except Exception as e:
-                logger.error(f"Request error: {str(e)}")
+
+                logger.error(
+                    "HF error: model=%s status=%d body=%s",
+                    model_key, resp.status_code, resp.text[:200],
+                )
                 return None
-        
+
+            except requests.Timeout:
+                logger.warning("Timeout: model=%s attempt=%d", model_key, attempt + 1)
+                if attempt < cfg.MAX_RETRIES - 1:
+                    time.sleep(1)
+            except requests.RequestException as exc:
+                logger.error("Request error: model=%s exc=%s", model_key, exc)
+                return None
+
         return None
-    
-    def analyze_text_patterns(self, text: str) -> Dict:
-        """Comprehensive text pattern analysis"""
-        text_lower = text.lower()
-        words = text.split()
-        
-        analysis = {
-            "basic_stats": {
-                "length": len(text),
-                "word_count": len(words),
-                "sentence_count": len(re.findall(r'[.!?]+', text)),
-                "avg_word_length": sum(len(word) for word in words) / len(words) if words else 0
-            },
-            "punctuation_analysis": {
-                "exclamation_marks": text.count('!'),
-                "question_marks": text.count('?'),
-                "ellipses": text.count('...'),
-                "quotes": text.count('"') + text.count("'")
-            },
-            "formatting_flags": {
-                "all_caps_words": len([word for word in words if word.isupper() and len(word) > 2]),
-                "repeated_chars": len(re.findall(r'(.)\1{2,}', text)),
-                "excessive_punctuation": len(re.findall(r'[!?]{2,}', text))
-            },
-            "content_flags": {
-                "numbers": len(re.findall(r'\d+', text)),
-                "urls": len(re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)),
-                "mentions": len(re.findall(r'@\w+', text))
-            }
-        }
-        
-        # Pattern matching for fake news indicators
-        analysis["fake_indicators"] = {
-            "clickbait_count": sum(1 for phrase in FAKE_NEWS_PATTERNS["clickbait_phrases"] if phrase in text_lower),
-            "sensational_words": sum(1 for word in FAKE_NEWS_PATTERNS["sensational_words"] if word in text_lower),
-            "emotional_triggers": sum(1 for trigger in FAKE_NEWS_PATTERNS["emotional_triggers"] if trigger in text_lower)
-        }
-        
-        return analysis
-    
-    def process_ai_results(self, ai_results: Dict) -> Dict:
-        """Process and normalize AI model results"""
-        processed = {
-            "toxicity_score": 0,
-            "sentiment_score": 0,
-            "sentiment_label": "neutral",
-            "confidence_factors": []
-        }
-        
-        # Process toxicity results
-        if "toxicity" in ai_results and ai_results["toxicity"]:
-            try:
-                toxicity_data = ai_results["toxicity"]
-                if isinstance(toxicity_data, list) and toxicity_data:
-                    if isinstance(toxicity_data[0], dict):
-                        for item in toxicity_data[0]:
-                            if isinstance(item, dict) and "label" in item:
-                                label = item["label"].lower()
-                                score = item.get("score", 0)
-                                if "toxic" in label or "fake" in label:
-                                    processed["toxicity_score"] = max(processed["toxicity_score"], score)
-                                    if score > 0.7:
-                                        processed["confidence_factors"].append("High toxicity detected")
-            except Exception as e:
-                logger.error(f"Error processing toxicity results: {e}")
-        
-        # Process sentiment results
-        if "sentiment" in ai_results and ai_results["sentiment"]:
-            try:
-                sentiment_data = ai_results["sentiment"]
-                if isinstance(sentiment_data, list) and sentiment_data:
-                    for item in sentiment_data:
-                        if isinstance(item, dict) and "label" in item:
-                            label = item["label"].lower()
-                            score = item.get("score", 0)
-                            processed["sentiment_label"] = label
-                            processed["sentiment_score"] = score
-                            if ("negative" in label and score > 0.8) or ("positive" in label and score > 0.9):
-                                processed["confidence_factors"].append("Extreme emotional bias detected")
-            except Exception as e:
-                logger.error(f"Error processing sentiment results: {e}")
-        
-        return processed
-    
-    def calculate_credibility_score(self, text_analysis: Dict, ai_processed: Dict) -> Dict:
-        """Advanced credibility scoring algorithm"""
-        credibility_score = 50  # Start neutral
-        risk_factors = []
-        positive_factors = []
-        
-        # Text pattern analysis
-        fake_indicators = text_analysis["fake_indicators"]
-        basic_stats = text_analysis["basic_stats"]
-        punctuation = text_analysis["punctuation_analysis"]
-        formatting = text_analysis["formatting_flags"]
-        
-        # Clickbait and sensational content
-        if fake_indicators["clickbait_count"] > 0:
-            penalty = fake_indicators["clickbait_count"] * 15
-            credibility_score -= penalty
-            risk_factors.append(f"Contains {fake_indicators['clickbait_count']} clickbait phrases")
-        
-        if fake_indicators["sensational_words"] > 2:
-            credibility_score -= 10
-            risk_factors.append("Heavy use of sensational language")
-        
-        # Formatting red flags
-        if formatting["all_caps_words"] > 2:
-            credibility_score -= 8
-            risk_factors.append("Excessive capitalization")
-        
-        if punctuation["exclamation_marks"] > 3:
-            credibility_score -= 5
-            risk_factors.append("Overuse of exclamation marks")
-        
-        # Length and structure analysis
-        if basic_stats["word_count"] < 10:
-            credibility_score -= 10
-            risk_factors.append("Too brief for credible reporting")
-        elif basic_stats["word_count"] > 100:
-            credibility_score += 5
-            positive_factors.append("Substantial content length")
-        
-        # Quote analysis (indicates sources)
-        if punctuation["quotes"] > 0:
-            credibility_score += 8
-            positive_factors.append("Contains quoted sources")
-        
-        # AI model results
-        if ai_processed["toxicity_score"] > 0.7:
-            credibility_score -= 20
-            risk_factors.append("AI detected toxic/misleading patterns")
-        
-        if ai_processed["sentiment_score"] > 0.85:
-            credibility_score -= 10
-            risk_factors.append("Extreme emotional bias")
-        
-        # Normalize score
-        credibility_score = max(0, min(100, credibility_score))
-        
-        # Calculate confidence based on analysis depth
-        confidence = min(90, 60 + len(risk_factors + positive_factors) * 5)
-        
-        return {
-            "credibility_score": credibility_score,
-            "is_credible": credibility_score >= 50,
-            "confidence": confidence,
-            "risk_factors": risk_factors,
-            "positive_factors": positive_factors,
-            "analysis_timestamp": datetime.now().isoformat()
-        }
 
-# Initialize analyzer
-analyzer = NewsAnalyzer()
+    def close(self) -> None:
+        self._session.close()
 
-@app.route('/')
+
+# ─────────────────────────────────────────────
+# Text feature extractor
+# ─────────────────────────────────────────────
+def extract_features(text: str) -> TextFeatures:
+    words = text.split()
+    lower = text.lower()
+
+    feat = TextFeatures()
+    feat.word_count = len(words)
+    feat.sentence_count = len(_SENTENCE_END_RE.findall(text)) or 1
+    feat.avg_word_length = (
+        sum(len(w) for w in words) / len(words) if words else 0.0
+    )
+    feat.exclamation_marks = text.count("!")
+    feat.question_marks = text.count("?")
+    feat.quote_count = text.count('"') + text.count("'")
+    feat.all_caps_words = len(_CAPS_WORD_RE.findall(text))
+    feat.repeated_chars = len(_REPEATED_CHAR_RE.findall(text))
+    feat.excessive_punct = len(_EXCESSIVE_PUNCT_RE.findall(text))
+    feat.url_count = len(_URL_RE.findall(text))
+    feat.mention_count = len(_MENTION_RE.findall(text))
+    feat.clickbait_matches = len(_CLICKBAIT_RE.findall(lower))
+    feat.sensational_word_count = sum(
+        1 for w in SENSATIONAL_WORDS if w in lower
+    )
+    feat.emotional_trigger_count = sum(
+        1 for t in EMOTIONAL_TRIGGERS if t in lower
+    )
+    return feat
+
+
+# ─────────────────────────────────────────────
+# AI result parser  (BUG FIX: correct nested structure handling)
+# ─────────────────────────────────────────────
+def _best_label(items: list[dict], target_labels: set[str]) -> tuple[str, float]:
+    """
+    Return the (label, score) of the highest-scoring item whose label
+    is in target_labels, or the single top item if none match.
+    Handles both flat [{"label":..,"score":..}] and nested [[{...}]] shapes.
+    """
+    # Flatten one level if wrapped in outer list
+    flat: list[dict] = []
+    for item in items:
+        if isinstance(item, list):
+            flat.extend(item)
+        elif isinstance(item, dict):
+            flat.append(item)
+
+    if not flat:
+        return "unknown", 0.0
+
+    # Sort descending by score
+    ranked = sorted(flat, key=lambda x: x.get("score", 0.0), reverse=True)
+
+    for entry in ranked:
+        label = str(entry.get("label", "")).lower()
+        if any(t in label for t in target_labels):
+            return label, float(entry.get("score", 0.0))
+
+    # Fallback: just return top entry
+    top = ranked[0]
+    return str(top.get("label", "unknown")).lower(), float(top.get("score", 0.0))
+
+
+def parse_ai_results(
+    raw_toxicity: Optional[list | dict],
+    raw_sentiment: Optional[list | dict],
+) -> AIResult:
+    result = AIResult()
+
+    # ── Toxicity ────────────────────────────────────────────
+    if raw_toxicity is not None:
+        try:
+            items = raw_toxicity if isinstance(raw_toxicity, list) else [raw_toxicity]
+            label, score = _best_label(items, {"toxic", "fake", "hate", "offensive"})
+            result.toxicity_label = label
+            result.toxicity_score = score
+            result.models_called.append("toxicity")
+        except Exception as exc:
+            logger.error("Toxicity parse error: %s", exc)
+            result.errors.append(f"toxicity parse: {exc}")
+
+    # ── Sentiment ───────────────────────────────────────────
+    if raw_sentiment is not None:
+        try:
+            items = raw_sentiment if isinstance(raw_sentiment, list) else [raw_sentiment]
+            label, score = _best_label(items, {"negative", "positive", "neutral"})
+            result.sentiment_label = label
+            result.sentiment_score = score
+            result.models_called.append("sentiment")
+            # Extreme = very high confidence in a strongly-valenced label
+            result.extreme_sentiment = (
+                score > 0.88 and label in ("negative", "positive")
+            )
+        except Exception as exc:
+            logger.error("Sentiment parse error: %s", exc)
+            result.errors.append(f"sentiment parse: {exc}")
+
+    return result
+
+
+# ─────────────────────────────────────────────
+# Calibrated credibility scorer
+# ─────────────────────────────────────────────
+# Each factor contributes a signed delta on a 0–100 scale.
+# Weights were chosen to reflect research on fake-news signals; tune as needed.
+
+def score_credibility(feat: TextFeatures, ai: AIResult) -> CredibilityResult:
+    score: float = 50.0   # neutral prior
+    risk: list[str] = []
+    positive: list[str] = []
+
+    # ── Linguistic red flags ─────────────────────────────────
+    if feat.clickbait_matches > 0:
+        delta = min(feat.clickbait_matches * 12, 30)
+        score -= delta
+        risk.append(
+            f"Clickbait language detected ({feat.clickbait_matches} phrase(s))"
+        )
+
+    if feat.sensational_word_count >= 3:
+        score -= 8
+        risk.append("Heavy use of sensational vocabulary")
+    elif feat.sensational_word_count >= 1:
+        score -= 3
+
+    if feat.emotional_trigger_count >= 2:
+        score -= 7
+        risk.append("Multiple emotional trigger words")
+
+    # ── Formatting red flags ────────────────────────────────
+    if feat.all_caps_words >= 3:
+        score -= 8
+        risk.append("Excessive ALL-CAPS usage")
+    elif feat.all_caps_words >= 1:
+        score -= 3
+
+    if feat.exclamation_marks >= 4:
+        score -= 6
+        risk.append("Excessive exclamation marks")
+    elif feat.exclamation_marks >= 2:
+        score -= 2
+
+    if feat.excessive_punct >= 2:
+        score -= 5
+        risk.append("Repeated multi-punctuation (!! / ??)")
+
+    # ── Content signals ─────────────────────────────────────
+    if feat.word_count < 15:
+        score -= 10
+        risk.append("Too brief for credible reporting")
+    elif feat.word_count >= 80:
+        score += 6
+        positive.append("Substantial article length")
+
+    if feat.sentence_count >= 4:
+        score += 4
+        positive.append("Well-structured prose")
+
+    if feat.quote_count >= 2:
+        score += 8
+        positive.append("Contains quoted sources or dialogue")
+    elif feat.quote_count == 1:
+        score += 3
+
+    if feat.url_count >= 1:
+        score += 4
+        positive.append("References external links")
+
+    # ── AI model signals ────────────────────────────────────
+    if "toxicity" in ai.models_called:
+        if ai.toxicity_score >= 0.8:
+            score -= 22
+            risk.append(
+                f"AI classifier: strong toxic/misleading signal ({ai.toxicity_score:.0%})"
+            )
+        elif ai.toxicity_score >= 0.5:
+            score -= 10
+            risk.append(
+                f"AI classifier: moderate toxic signal ({ai.toxicity_score:.0%})"
+            )
+        else:
+            score += 5
+            positive.append("AI classifier: low toxicity signal")
+
+    if "sentiment" in ai.models_called:
+        if ai.extreme_sentiment:
+            score -= 8
+            risk.append(
+                f"Extreme {ai.sentiment_label} sentiment ({ai.sentiment_score:.0%} confidence)"
+            )
+
+    # ── Clamp and label ─────────────────────────────────────
+    score = max(0.0, min(100.0, score))
+
+    if score >= 60:
+        label = "CREDIBLE"
+    elif score <= 38:
+        label = "SUSPICIOUS"
+    else:
+        label = "UNCERTAIN"
+
+    # Confidence = how many independent signals fired
+    signal_count = len(risk) + len(positive)
+    confidence = min(95.0, 50.0 + signal_count * 5.0)
+
+    return CredibilityResult(
+        score=round(score, 1),
+        label=label,
+        confidence=round(confidence, 1),
+        risk_factors=risk,
+        positive_factors=positive,
+        timestamp=datetime.utcnow().isoformat() + "Z",
+    )
+
+
+# ─────────────────────────────────────────────
+# Singleton HF client (reuse TCP connections)
+# ─────────────────────────────────────────────
+hf = HFClient()
+
+
+# ─────────────────────────────────────────────
+# Routes
+# ─────────────────────────────────────────────
+SAMPLE_TEXTS = {
+    "real": (
+        "The UAE government announced new regulations for artificial intelligence "
+        "development, focusing on ethical AI practices and data privacy. The policy "
+        "initiative, confirmed by the Ministry of AI, aims to position the country as "
+        "a global leader in responsible innovation, with phased compliance deadlines "
+        "starting in Q1 2025."
+    ),
+    "fake": (
+        "Scientists have discovered that sleeping upsidedown "
+        "can increase lifespan by 200%!! You won't believe what "
+        "happens next. Doctors HATE this one weird trick! Incredible breakthrough that "
+        "they don't want you to know about!!!"
+    ),
+    "unclear": (
+        "A new study suggests that people who eat chocolate daily may have better "
+        "memory, though the research sample was small and the funding source was "
+        "not disclosed."
+    ),
+}
+
+
+@app.route("/")
 def index():
-    """Render main page with sample texts"""
-    return render_template('index.html', samples=SAMPLE_TEXTS)
+    return render_template("index.html", samples=SAMPLE_TEXTS)
 
-@app.route('/samples')
+
+@app.route("/samples")
 def get_samples():
-    """API endpoint for sample texts"""
     return jsonify(SAMPLE_TEXTS)
 
-@app.route('/check', methods=['POST'])
+
+@app.route("/check", methods=["POST"])
+@limiter.limit(cfg.RATE_LIMIT_DEFAULT)
 def check_news():
-    """Enhanced news analysis endpoint"""
-    try:
-        data = request.get_json()
-        
-        if not data or 'text' not in data:
-            return jsonify({'error': 'No text provided for analysis'}), 400
-        
-        news_text = data['text'].strip()
-        
-        if not news_text:
-            return jsonify({'error': 'Empty text provided'}), 400
-        
-        if len(news_text) > Config.MAX_TEXT_LENGTH:
-            return jsonify({
-                'error': f'Text too long. Please limit to {Config.MAX_TEXT_LENGTH} characters.'
-            }), 400
-        
-        logger.info(f"Analyzing text of length: {len(news_text)}")
-        
-        # Multi-model AI analysis
-        ai_results = {}
-        for model_key in ["primary", "secondary"]:
-            result = analyzer.call_huggingface_api(model_key, news_text)
-            if result:
-                ai_results[MODELS[model_key]["purpose"]] = result
-        
-        # Text pattern analysis
-        text_analysis = analyzer.analyze_text_patterns(news_text)
-        
-        # Process AI results
-        ai_processed = analyzer.process_ai_results(ai_results)
-        
-        # Calculate final credibility score
-        final_analysis = analyzer.calculate_credibility_score(text_analysis, ai_processed)
-        
-        # Prepare comprehensive response
-        response = {
-            'classification': 'CREDIBLE' if final_analysis['is_credible'] else 'SUSPICIOUS',
-            'confidence': final_analysis['confidence'],
-            'credibility_score': final_analysis['credibility_score'],
-            'isReal': final_analysis['is_credible'],
-            'explanation': '. '.join(final_analysis['risk_factors'][:3]) if final_analysis['risk_factors'] else 'Analysis shows standard content patterns',
-            'analysis_details': {
-                'risk_factors': final_analysis['risk_factors'],
-                'positive_factors': final_analysis['positive_factors'],
-                'text_stats': text_analysis['basic_stats'],
-                'ai_models_used': list(ai_results.keys()),
-                'timestamp': final_analysis['analysis_timestamp']
+    """Single-text credibility analysis endpoint."""
+    body = request.get_json(silent=True)
+    if not body or "text" not in body:
+        return jsonify({"error": "Request body must contain a 'text' field."}), 400
+
+    text = body["text"].strip()
+    if not text:
+        return jsonify({"error": "Text field is empty."}), 400
+    if len(text) > cfg.MAX_TEXT_LENGTH:
+        return jsonify(
+            {"error": f"Text exceeds {cfg.MAX_TEXT_LENGTH} character limit."}
+        ), 400
+
+    logger.info("Analysing text (len=%d)", len(text))
+
+    # ── AI calls (run both regardless; errors surfaced in AIResult) ──
+    raw_tox = hf.query("toxicity", text)
+    raw_sent = hf.query("sentiment", text)
+
+    # ── Feature extraction ───────────────────────────────────────────
+    features = extract_features(text)
+
+    # ── Parse AI results (BUG-FIXED parser) ─────────────────────────
+    ai = parse_ai_results(raw_tox, raw_sent)
+
+    # ── Calibrated scoring ───────────────────────────────────────────
+    result = score_credibility(features, ai)
+
+    return jsonify(
+        {
+            "classification": result.label,
+            "credibility_score": result.score,
+            "confidence": result.confidence,
+            "is_credible": result.label == "CREDIBLE",
+            "explanation": (
+                ". ".join(result.risk_factors[:3])
+                if result.risk_factors
+                else "No significant credibility concerns detected."
+            ),
+            "analysis_details": {
+                "risk_factors": result.risk_factors,
+                "positive_factors": result.positive_factors,
+                "text_stats": {
+                    "word_count": features.word_count,
+                    "sentence_count": features.sentence_count,
+                    "avg_word_length": round(features.avg_word_length, 2),
+                },
+                "ai": {
+                    "models_used": ai.models_called,
+                    "toxicity_score": ai.toxicity_score,
+                    "toxicity_label": ai.toxicity_label,
+                    "sentiment_label": ai.sentiment_label,
+                    "sentiment_score": ai.sentiment_score,
+                    "parse_errors": ai.errors,
+                },
+                "timestamp": result.timestamp,
             },
-            'ai_powered': True
         }
-        
-        return jsonify(response)
-        
-    except Exception as e:
-        logger.error(f"Error in check_news: {str(e)}")
-        return jsonify({
-            'error': 'An unexpected error occurred during analysis. Please try again.'
-        }), 500
+    )
 
-@app.route('/health')
-def health_check():
-    """Enhanced health check with system status"""
-    return jsonify({
-        'status': 'healthy',
-        'service': 'TruthLens AI (Enhanced)',
-        'models_available': list(MODELS.keys()),
-        'api_token_configured': bool(Config.HF_API_TOKEN),
-        'timestamp': datetime.now().isoformat()
-    })
 
-@app.route('/analyze/bulk', methods=['POST'])
+@app.route("/analyze/bulk", methods=["POST"])
+@limiter.limit(cfg.RATE_LIMIT_BULK)
 def bulk_analyze():
-    """New endpoint for bulk analysis"""
-    try:
-        data = request.get_json()
-        texts = data.get('texts', [])
-        
-        if not texts or not isinstance(texts, list):
-            return jsonify({'error': 'No texts array provided'}), 400
-        
-        if len(texts) > 10:
-            return jsonify({'error': 'Maximum 10 texts allowed per request'}), 400
-        
-        results = []
-        for idx, text in enumerate(texts):
-            if len(text.strip()) > 0:
-                # Simplified analysis for bulk processing
-                text_analysis = analyzer.analyze_text_patterns(text)
-                ai_processed = {"toxicity_score": 0, "sentiment_score": 0.5, "confidence_factors": []}
-                final_analysis = analyzer.calculate_credibility_score(text_analysis, ai_processed)
-                
-                results.append({
-                    'index': idx,
-                    'text_preview': text[:100] + '...' if len(text) > 100 else text,
-                    'classification': 'CREDIBLE' if final_analysis['is_credible'] else 'SUSPICIOUS',
-                    'credibility_score': final_analysis['credibility_score'],
-                    'confidence': final_analysis['confidence']
-                })
-        
-        return jsonify({
-            'results': results,
-            'total_analyzed': len(results),
-            'timestamp': datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        logger.error(f"Error in bulk_analyze: {str(e)}")
-        return jsonify({'error': 'Bulk analysis failed'}), 500
+    """Bulk analysis (pattern-only, no AI calls to stay within rate limits)."""
+    body = request.get_json(silent=True)
+    if not body or not isinstance(body.get("texts"), list):
+        return jsonify({"error": "'texts' must be a JSON array."}), 400
 
-if __name__ == '__main__':
-    print(" Starting Enhanced TruthLens AI")
-    print("=" * 60)
-    
-    if Config.HF_API_TOKEN:
-        print(" Hugging Face API token configured")
+    texts: list = body["texts"]
+    if len(texts) > 10:
+        return jsonify({"error": "Maximum 10 texts per bulk request."}), 400
+
+    results = []
+    for idx, text in enumerate(texts):
+        if not isinstance(text, str) or not text.strip():
+            results.append({"index": idx, "error": "Empty or invalid text."})
+            continue
+
+        features = extract_features(text.strip())
+        # Bulk uses pattern-only scoring (no AI to stay within API limits)
+        empty_ai = AIResult()
+        cred = score_credibility(features, empty_ai)
+
+        results.append(
+            {
+                "index": idx,
+                "preview": text[:120].rstrip() + ("…" if len(text) > 120 else ""),
+                "classification": cred.label,
+                "credibility_score": cred.score,
+                "confidence": cred.confidence,
+                "risk_count": len(cred.risk_factors),
+            }
+        )
+
+    return jsonify(
+        {
+            "results": results,
+            "total": len(results),
+            "ai_powered": False,
+            "note": "Bulk endpoint uses pattern-only scoring. Use /check for AI-enhanced analysis.",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+    )
+
+
+@app.route("/health")
+def health():
+    return jsonify(
+        {
+            "status": "healthy",
+            "service": "TruthLens AI — Elite Edition",
+            "models": list(MODELS.keys()),
+            "api_token_configured": bool(cfg.HF_API_TOKEN),
+            "rate_limits": {
+                "/check": cfg.RATE_LIMIT_DEFAULT,
+                "/analyze/bulk": cfg.RATE_LIMIT_BULK,
+            },
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+    )
+
+
+# ─────────────────────────────────────────────
+# Startup
+# ─────────────────────────────────────────────
+if __name__ == "__main__":
+    print("\n🔍 TruthLens AI — Elite Edition")
+    print("─" * 50)
+    if cfg.HF_API_TOKEN:
+        print("HuggingFace token: configured")
     else:
-        print("  No Hugging Face API token found")
-        print("   Get a free token at: https://huggingface.co/settings/tokens")
-    
-    print(f" Enhanced analysis with {len(MODELS)} AI models")
-    print(f" Pattern detection for {sum(len(patterns) for patterns in FAKE_NEWS_PATTERNS.values())} indicators")
-    print(" Server starting at: http://127.0.0.1:5000")
-    print(" Test endpoint: /health")
-    print(" Bulk analysis: /analyze/bulk")
-    print("=" * 60)
-    
-    app.run(debug=True, host='127.0.0.1', port=5000)
+        print(" HuggingFace token: NOT SET")
+        print("   Set HF_API_TOKEN env var for AI-enhanced analysis.")
+    print(f"Models: {', '.join(MODELS)}")
+    print(f" Rate limiting: {cfg.RATE_LIMIT_DEFAULT} (check), {cfg.RATE_LIMIT_BULK} (bulk)")
+    print("http://127.0.0.1:5000")
+    print("─" * 50 + "\n")
+
+    app.run(debug=False, host="127.0.0.1", port=5000)
