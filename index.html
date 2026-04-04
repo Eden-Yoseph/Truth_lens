@@ -1,174 +1,713 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TruthLens - AI News Verification</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
-        .container { max-width: 800px; margin: 0 auto; background: rgba(255, 255, 255, 0.95); border-radius: 20px; padding: 40px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1); }
-        .header { text-align: center; margin-bottom: 30px; }
-        .header h1 { font-size: 2.5em; color: #2c3e50; margin-bottom: 10px; }
-        .header .logo { font-size: 3em; margin-bottom: 10px; }
-        .header p { color: #7f8c8d; font-size: 1.1em; line-height: 1.6; }
-        .input-section { margin-bottom: 30px; }
-        .input-label { display: block; margin-bottom: 10px; font-weight: 600; color: #2c3e50; }
-        .news-input { width: 100%; min-height: 150px; padding: 20px; border: 2px solid #e0e0e0; border-radius: 12px; font-size: 16px; resize: vertical; transition: border-color 0.3s ease; }
-        .news-input:focus { outline: none; border-color: #667eea; }
-        .sample-buttons { margin-top: 10px; }
-        .sample-btn { background: #f8f9fa; border: 1px solid #e0e0e0; padding: 6px 10px; margin: 3px; border-radius: 6px; font-size: 0.85em; cursor: pointer; transition: background 0.2s ease; }
-        .sample-btn:hover { background: #e9ecef; }
-        .analyze-btn { width: 100%; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; font-size: 1.1em; font-weight: 600; cursor: pointer; transition: transform 0.2s ease; margin-bottom: 20px; }
-        .analyze-btn:hover { transform: translateY(-2px); }
-        .analyze-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
-        .loading { text-align: center; padding: 20px; color: #7f8c8d; display: none; }
-        .loading-spinner { display: inline-block; width: 30px; height: 30px; border: 3px solid #e0e0e0; border-top: 3px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 10px; }
-        .result-section { display: none; padding: 20px; border-radius: 12px; margin-bottom: 20px; animation: fadeIn 0.5s ease; }
-        .result-section.show { display: block; }
-        .result-credible { background: linear-gradient(135deg, #2ecc71, #27ae60); color: white; }
-        .result-suspicious { background: linear-gradient(135deg, #e74c3c, #c0392b); color: white; }
-        .result-header { display: flex; align-items: center; margin-bottom: 15px; }
-        .result-icon { font-size: 2em; margin-right: 15px; }
-        .result-title { font-size: 1.5em; font-weight: 700; }
-        .confidence-info { margin: 10px 0; }
-        .confidence-bar { background: rgba(255, 255, 255, 0.3); height: 6px; border-radius: 3px; overflow: hidden; }
-        .confidence-fill { height: 100%; background: white; border-radius: 3px; transition: width 0.8s ease; }
-        .explanation { font-size: 1em; line-height: 1.5; margin-top: 10px; }
-        .footer { text-align: center; margin-top: 30px; color: #7f8c8d; font-size: 0.9em; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        @media (max-width: 768px) { .container { padding: 20px; margin: 10px; } .header h1 { font-size: 2em; } }
-    </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TruthLens ✿ News Checker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&family=Caveat:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --cream:    #fdf6ee;
+  --blush:    #f9e8e8;
+  --rose:     #e8a4a4;
+  --rose-hi:  #d4797a;
+  --lilac:    #ede8f8;
+  --lavender: #b8a4d4;
+  --lav-hi:   #9278be;
+  --mint:     #d8f0e8;
+  --sage:     #5fa882;
+  --peach:    #fde8d4;
+  --butter:   #fdf5d4;
+  --marigold: #d4a030;
+  --text:     #3d2a2a;
+  --muted:    #8a6e6e;
+  --border:   rgba(180,130,130,.18);
+  --r:        22px;
+}
+
+html { font-size: 16px; scroll-behavior: smooth; }
+
+body {
+  background: var(--cream);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300;
+  line-height: 1.7;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+body::before, body::after {
+  content: '';
+  position: fixed;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+body::before {
+  width: 520px; height: 520px;
+  background: radial-gradient(circle, rgba(232,160,164,.2) 0%, transparent 70%);
+  top: -130px; right: -130px;
+}
+body::after {
+  width: 420px; height: 420px;
+  background: radial-gradient(circle, rgba(184,164,212,.18) 0%, transparent 70%);
+  bottom: -110px; left: -90px;
+}
+
+.petal {
+  position: fixed;
+  pointer-events: none;
+  z-index: 0;
+  animation: drift linear infinite;
+  opacity: .5;
+  user-select: none;
+}
+@keyframes drift {
+  0%   { transform: translateY(-50px) rotate(0deg);   opacity: 0; }
+  8%   { opacity: .5; }
+  92%  { opacity: .5; }
+  100% { transform: translateY(110vh) rotate(400deg); opacity: 0; }
+}
+
+.wrap {
+  position: relative;
+  z-index: 1;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 0 24px 100px;
+}
+
+/* ── Header ── */
+header { text-align: center; padding: 64px 0 52px; }
+
+.flower-row {
+  font-size: 26px;
+  letter-spacing: 10px;
+  margin-bottom: 14px;
+  display: inline-block;
+  animation: sway 3.5s ease-in-out infinite;
+}
+@keyframes sway {
+  0%,100% { transform: rotate(-3deg) scale(1); }
+  50%      { transform: rotate(3deg) scale(1.04); }
+}
+
+h1 {
+  font-family: 'Playfair Display', serif;
+  font-weight: 700;
+  font-size: clamp(2.4rem, 5.5vw, 3.2rem);
+  color: var(--rose-hi);
+  line-height: 1.1;
+  margin-bottom: 10px;
+}
+h1 em {
+  font-style: italic;
+  color: var(--lav-hi);
+}
+
+.tagline {
+  font-family: 'Caveat', cursive;
+  font-size: 1.3rem;
+  color: var(--lavender);
+  font-weight: 700;
+}
+
+.pills-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 22px;
+}
+.pill {
+  font-size: .7rem;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  padding: 5px 14px;
+  border-radius: 99px;
+  background: white;
+  border: 1.5px solid rgba(180,130,130,.2);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pill .dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--sage);
+  animation: breathe 2.2s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%,100% { transform: scale(1);   opacity: 1;  }
+  50%      { transform: scale(.55); opacity: .4; }
+}
+
+/* ── Input card ── */
+.input-card {
+  background: white;
+  border: 1.5px solid rgba(180,130,130,.2);
+  border-radius: var(--r);
+  overflow: hidden;
+  box-shadow: 0 4px 28px rgba(180,130,130,.09);
+  transition: box-shadow .25s, border-color .25s;
+}
+.input-card:focus-within {
+  border-color: var(--rose);
+  box-shadow: 0 8px 36px rgba(212,121,122,.16);
+}
+
+.input-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 22px 12px;
+  border-bottom: 1.5px solid rgba(180,130,130,.12);
+  background: linear-gradient(135deg, #fdf0f0 0%, #f5eeff 100%);
+}
+.input-top label {
+  font-family: 'Caveat', cursive;
+  font-size: 1.05rem;
+  color: var(--rose-hi);
+  font-weight: 700;
+}
+#char-count {
+  font-size: .72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  transition: color .2s;
+}
+#char-count.warn { color: var(--marigold); }
+#char-count.over { color: #c44; }
+
+textarea {
+  width: 100%;
+  min-height: 168px;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: vertical;
+  padding: 22px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: .9rem;
+  font-weight: 300;
+  color: var(--text);
+  line-height: 1.8;
+}
+textarea::placeholder { color: #d4b8b8; }
+
+/* ── Samples ── */
+.samples-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 18px;
+}
+.samples-label {
+  font-family: 'Caveat', cursive;
+  font-size: 1.05rem;
+  color: var(--lavender);
+  font-weight: 700;
+}
+.sample-btn {
+  font-family: 'DM Sans', sans-serif;
+  font-size: .75rem;
+  font-weight: 400;
+  padding: 6px 16px;
+  border-radius: 99px;
+  border: 1.5px solid;
+  cursor: pointer;
+  transition: all .18s;
+}
+.sample-btn.real  { border-color: var(--sage);    color: var(--sage);    background: var(--mint);  }
+.sample-btn.fake  { border-color: var(--rose-hi); color: var(--rose-hi); background: var(--blush); }
+.sample-btn.gray  { border-color: var(--lavender);color: var(--lav-hi);  background: var(--lilac); }
+.sample-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+.sample-btn:active { transform: translateY(0); }
+
+/* ── CTA ── */
+.cta-row {
+  display: flex;
+  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 24px;
+}
+#analyse-btn {
+  font-family: 'Playfair Display', serif;
+  font-style: italic;
+  font-size: 1.15rem;
+  padding: 14px 52px;
+  border-radius: 99px;
+  border: none;
+  background: linear-gradient(135deg, #e07c7d 0%, #9278be 100%);
+  color: white;
+  cursor: pointer;
+  box-shadow: 0 6px 24px rgba(200,100,120,.3);
+  transition: all .22s;
+  position: relative;
+  overflow: hidden;
+  letter-spacing: .01em;
+}
+#analyse-btn::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: rgba(255,255,255,.15);
+  opacity: 0;
+  transition: opacity .15s;
+}
+#analyse-btn:hover { transform: translateY(-3px); box-shadow: 0 10px 32px rgba(200,100,120,.38); }
+#analyse-btn:hover::before { opacity: 1; }
+#analyse-btn:active { transform: translateY(0); }
+#analyse-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+#analyse-btn.loading { color: transparent; }
+#analyse-btn.loading::after {
+  content: '';
+  position: absolute; top: 50%; left: 50%;
+  width: 20px; height: 20px;
+  margin: -10px 0 0 -10px;
+  border: 2px solid rgba(255,255,255,.4);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin .65s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.hint {
+  font-size: .75rem;
+  color: #c8adb0;
+  font-style: italic;
+  display: none;
+  font-family: 'Caveat', cursive;
+  font-size: 1rem;
+}
+
+/* ── Result panel ── */
+#result-panel {
+  margin-top: 52px;
+  opacity: 0;
+  transform: translateY(22px);
+  transition: opacity .5s cubic-bezier(.16,1,.3,1), transform .5s cubic-bezier(.16,1,.3,1);
+  pointer-events: none;
+}
+#result-panel.visible { opacity: 1; transform: none; pointer-events: auto; }
+
+/* ── Verdict banner ── */
+.verdict-banner {
+  border-radius: var(--r);
+  padding: 28px 30px;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin-bottom: 18px;
+  border: 1.5px solid;
+  position: relative;
+  overflow: hidden;
+}
+.verdict-banner::after {
+  content: '';
+  position: absolute;
+  right: -40px; bottom: -40px;
+  width: 160px; height: 160px;
+  border-radius: 50%;
+  opacity: .12;
+  background: currentColor;
+}
+.verdict-banner.credible   { background: #eaf8f1; border-color: #7dbd9c; color: #7dbd9c; }
+.verdict-banner.suspicious { background: #fdf0f0; border-color: #e8a4a4; color: #e8a4a4; }
+.verdict-banner.uncertain  { background: #fdf8ec; border-color: #e8c96a; color: #e8c96a; }
+
+.verdict-emoji {
+  font-size: 3.2rem;
+  flex-shrink: 0;
+  animation: popIn .55s cubic-bezier(.34,1.56,.64,1) both;
+}
+@keyframes popIn {
+  0%   { transform: scale(0) rotate(-15deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+.verdict-label {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.credible  .verdict-label  { color: #3a8a62; }
+.suspicious .verdict-label { color: var(--rose-hi); }
+.uncertain .verdict-label  { color: #b08020; }
+
+.verdict-sub {
+  font-size: .84rem;
+  margin-top: 5px;
+  color: var(--muted);
+  font-weight: 300;
+  max-width: 420px;
+}
+
+.score-bubble { margin-left: auto; flex-shrink: 0; }
+.score-circle {
+  width: 78px; height: 78px;
+  border-radius: 50%;
+  background: white;
+  border: 2.5px solid;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(0,0,0,.06);
+}
+.credible  .score-circle { border-color: #7dbd9c; }
+.suspicious .score-circle { border-color: var(--rose); }
+.uncertain .score-circle  { border-color: #e8c96a; }
+
+.score-num-big {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.55rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.credible  .score-num-big { color: #3a8a62; }
+.suspicious .score-num-big { color: var(--rose-hi); }
+.uncertain .score-num-big  { color: #b08020; }
+.score-small {
+  font-size: .58rem;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* Confidence */
+.conf-strip {
+  background: white;
+  border: 1.5px solid rgba(180,130,130,.16);
+  border-radius: 16px;
+  padding: 18px 22px;
+  margin-bottom: 18px;
+}
+.conf-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+.conf-label-row span:first-child {
+  font-family: 'Caveat', cursive;
+  font-size: 1.05rem;
+  color: var(--lav-hi);
+  font-weight: 700;
+}
+.conf-label-row span:last-child { font-size: .78rem; color: var(--muted); }
+
+.conf-track {
+  width: 100%;
+  height: 9px;
+  background: var(--lilac);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.conf-fill {
+  height: 100%;
+  border-radius: 99px;
+  width: 0;
+  background: linear-gradient(90deg, var(--rose) 0%, var(--lav-hi) 100%);
+  transition: width 1.2s cubic-bezier(.16,1,.3,1);
+}
+
+/* Cards grid */
+.cards-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 560px) {
+  .cards-grid { grid-template-columns: 1fr; }
+  .verdict-banner { flex-wrap: wrap; }
+  .score-bubble { margin-left: 0; }
+}
+
+.detail-card {
+  background: white;
+  border: 1.5px solid rgba(180,130,130,.16);
+  border-radius: 18px;
+  padding: 20px 22px;
+  box-shadow: 0 2px 16px rgba(180,130,130,.06);
+}
+.detail-card h3 {
+  font-family: 'Caveat', cursive;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--lav-hi);
+  margin-bottom: 14px;
+}
+
+.factor-list { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.factor-list li {
+  font-size: .82rem;
+  font-weight: 300;
+  line-height: 1.45;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.factor-list li .bul { flex-shrink: 0; font-size: 13px; margin-top: 2px; }
+.factor-list.risk li .bul     { color: var(--rose-hi); }
+.factor-list.positive li .bul { color: var(--sage); }
+
+.empty-note { font-size: .8rem; color: #c8adb0; font-style: italic; }
+
+.ai-bubbles { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.ai-bubble {
+  background: var(--lilac);
+  border-radius: 12px;
+  padding: 11px 13px;
+}
+.ai-bubble .k { font-size: .64rem; letter-spacing: .08em; text-transform: uppercase; color: var(--lavender); margin-bottom: 3px; }
+.ai-bubble .v { font-size: .92rem; color: var(--lav-hi); font-weight: 500; }
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 0;
+  border-bottom: 1.5px dashed rgba(200,160,160,.22);
+  font-size: .82rem;
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-row .k { color: var(--muted); }
+.stat-row .v { font-weight: 500; color: var(--rose-hi); }
+
+.error-card {
+  background: var(--blush);
+  border: 1.5px solid var(--rose);
+  border-radius: 14px;
+  padding: 20px;
+  font-size: .85rem;
+  color: var(--rose-hi);
+  display: flex;
+  gap: 10px;
+}
+
+footer {
+  text-align: center;
+  margin-top: 80px;
+  font-size: .74rem;
+  color: #c8adb0;
+  line-height: 2;
+}
+</style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <div class="logo">🔍</div>
-            <h1>TruthLens</h1>
-            <p>AI-powered news verification. Analyze any article or headline for credibility.</p>
-        </div>
 
-        <div class="input-section">
-            <label class="input-label">Enter News Text:</label>
-            <textarea id="newsInput" class="news-input" placeholder="Paste your news article or headline here..."></textarea>
-            <div class="sample-buttons">
-                <button class="sample-btn" onclick="loadSample('real')">Real News</button>
-                <button class="sample-btn" onclick="loadSample('fake')">Fake News</button>
-                <button class="sample-btn" onclick="loadSample('unclear')">Unclear</button>
-            </div>
-        </div>
+<div class="wrap">
 
-        <button id="analyzeBtn" class="analyze-btn" onclick="analyzeNews()">🔍 Analyze News</button>
+  <header>
+    <div class="flower-row">✿ ❀ ✾</div>
+    <h1>Truth<em>Lens</em></h1>
+    <p class="tagline">your cute little fake-news detector ♡</p>
+    <div class="pills-row">
+      <div class="pill"><span class="dot"></span> AI Models Online</div>
+      <div class="pill"><span class="dot"></span> Pattern Engine</div>
+      <div class="pill"><span class="dot"></span> 30+ Signals</div>
+    </div>
+  </header>
 
-        <div id="loadingSection" class="loading">
-            <div class="loading-spinner"></div>
-            <p>AI analyzing content...</p>
-        </div>
+  <div class="input-card">
+    <div class="input-top">
+      <label for="news-input">paste your article or headline here ✍︎</label>
+      <span id="char-count">0 / 2000</span>
+    </div>
+    <textarea id="news-input"
+      placeholder="drop the news here and i'll figure out if it's tea or fake news ☕✨"
+      maxlength="2001"></textarea>
+  </div>
 
-        <div id="resultSection" class="result-section">
-            <div class="result-header">
-                <span id="resultIcon" class="result-icon"></span>
-                <span id="resultTitle" class="result-title"></span>
-            </div>
-            <div class="confidence-info">
-                Confidence: <span id="confidenceText"></span>
-                <div class="confidence-bar">
-                    <div id="confidenceFill" class="confidence-fill"></div>
-                </div>
-            </div>
-            <div id="explanation" class="explanation"></div>
-        </div>
+  <div class="samples-row">
+    <span class="samples-label">try a sample →</span>
+    <button class="sample-btn real" data-sample="real">✓ credible</button>
+    <button class="sample-btn fake" data-sample="fake">✗ suspicious</button>
+    <button class="sample-btn gray" data-sample="unclear">~ unclear</button>
+  </div>
 
-        <div class="footer">
-            <p>Enhanced with AI • Built for Media Literacy</p>
+  <div class="cta-row">
+    <button id="analyse-btn">analyse it ✿</button>
+    <span class="hint" id="api-hint">AI models may take ~20s on first run ♡</span>
+  </div>
+
+  <div id="result-panel" role="region" aria-live="polite"></div>
+
+  <footer>
+    TruthLens AI ✿ Elite Edition &nbsp;·&nbsp; made with love &amp; machine learning ♡
+  </footer>
+
+</div>
+
+<script>
+/* ── floating petals ── */
+(function() {
+  const sym = ['✿','❀','✾','❁','⚘','✽','꩜'];
+  for (let i = 0; i < 16; i++) {
+    const p = document.createElement('div');
+    p.className = 'petal';
+    p.textContent = sym[i % sym.length];
+    p.style.cssText = `
+      left:${Math.random()*100}vw;
+      font-size:${13+Math.random()*11}px;
+      animation-duration:${13+Math.random()*16}s;
+      animation-delay:${Math.random()*20}s;
+      color:hsl(${300+Math.random()*60},60%,70%);
+    `;
+    document.body.appendChild(p);
+  }
+})();
+
+/* ── core ── */
+const MAX = 2000;
+const ta     = document.getElementById('news-input');
+const cc     = document.getElementById('char-count');
+const btn    = document.getElementById('analyse-btn');
+const panel  = document.getElementById('result-panel');
+const hint   = document.getElementById('api-hint');
+
+const SAMPLES = {
+  real: 'The UAE government announced new regulations for artificial intelligence development, focusing on ethical AI practices and data privacy. The policy initiative, confirmed by the Ministry of AI, aims to position the country as a global leader in responsible innovation, with phased compliance deadlines starting in Q1 2025.',
+  fake: "Scientists have discovered that drinking coffee BACKWARDS (spitting it out instead of swallowing) can increase lifespan by 200%!! You won't believe what happens next. Doctors HATE this one weird trick! Incredible breakthrough that they don't want you to know about!!!",
+  unclear: 'A new study suggests that people who eat chocolate daily may have better memory, though the research sample was small and the funding source was not disclosed.',
+};
+
+ta.addEventListener('input', () => {
+  const n = ta.value.length;
+  cc.textContent = `${n} / ${MAX}`;
+  cc.className = n > MAX ? 'over' : n > MAX * .8 ? 'warn' : '';
+});
+
+document.querySelectorAll('.sample-btn').forEach(b =>
+  b.addEventListener('click', () => {
+    ta.value = SAMPLES[b.dataset.sample] || '';
+    ta.dispatchEvent(new Event('input'));
+  })
+);
+
+btn.addEventListener('click', run);
+ta.addEventListener('keydown', e => { if ((e.ctrlKey||e.metaKey) && e.key==='Enter') run(); });
+
+async function run() {
+  const text = ta.value.trim();
+  if (!text) { ta.focus(); return; }
+  if (text.length > MAX) return;
+
+  btn.disabled = true; btn.classList.add('loading'); btn.textContent = '…';
+  hint.style.display = 'block';
+  panel.classList.remove('visible');
+
+  try {
+    const res  = await fetch('/check', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text}) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'something went wrong :(');
+    render(data);
+  } catch(e) {
+    renderErr(e.message);
+  } finally {
+    btn.disabled = false; btn.classList.remove('loading'); btn.textContent = 'analyse it ✿';
+  }
+}
+
+const VC = {
+  credible:   { emoji:'🌸', label:'Looks Credible!',  sub:'This content shows signs of reliable reporting.' },
+  suspicious: { emoji:'🌹', label:'Seems Suspicious', sub:'This content raised several red flags.' },
+  uncertain:  { emoji:'🌼', label:'Hard to Say…',     sub:'Mixed signals — read carefully and verify.' },
+};
+
+function cls(lbl) {
+  return lbl==='CREDIBLE' ? 'credible' : lbl==='SUSPICIOUS' ? 'suspicious' : 'uncertain';
+}
+function esc(s) {
+  return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function pct(n) { return (+(n||0)*100).toFixed(0)+'%'; }
+
+function factors(arr, type) {
+  if (!arr||!arr.length) return '<p class="empty-note">none found ♡</p>';
+  const icon = type==='risk' ? '✗' : '✓';
+  return `<ul class="factor-list ${type}">${arr.map(f=>`<li><span class="bul">${icon}</span>${esc(f)}</li>`).join('')}</ul>`;
+}
+
+function render(d) {
+  const c    = cls(d.classification);
+  const v    = VC[c];
+  const det  = d.analysis_details || {};
+  const ai   = det.ai || {};
+  const st   = det.text_stats || {};
+  const conf = d.confidence || 0;
+  const scr  = d.credibility_score || 0;
+
+  panel.innerHTML = `
+    <div class="verdict-banner ${c}">
+      <div class="verdict-emoji">${v.emoji}</div>
+      <div>
+        <div class="verdict-label">${v.label}</div>
+        <div class="verdict-sub">${esc(d.explanation || v.sub)}</div>
+      </div>
+      <div class="score-bubble">
+        <div class="score-circle">
+          <div class="score-num-big">${Math.round(scr)}</div>
+          <div class="score-small">/ 100</div>
         </div>
+      </div>
     </div>
 
-    <script>
-        let samples = {};
+    <div class="conf-strip">
+      <div class="conf-label-row">
+        <span>analysis confidence ✾</span>
+        <span>${conf.toFixed(0)}% from ${(det.risk_factors||[]).length+(det.positive_factors||[]).length} signals</span>
+      </div>
+      <div class="conf-track"><div class="conf-fill" data-conf="${conf}"></div></div>
+    </div>
 
-        // Load samples from backend
-        fetch('/samples')
-            .then(response => response.json())
-            .then(data => samples = data)
-            .catch(error => console.error('Error loading samples:', error));
+    <div class="cards-grid">
+      <div class="detail-card">
+        <h3>✗ red flags</h3>
+        ${factors(det.risk_factors,'risk')}
+      </div>
+      <div class="detail-card">
+        <h3>✓ good signs</h3>
+        ${factors(det.positive_factors,'positive')}
+      </div>
+      <div class="detail-card">
+        <h3>✿ AI results</h3>
+        ${ai.models_used&&ai.models_used.length ? `
+          <div class="ai-bubbles">
+            <div class="ai-bubble"><div class="k">Toxicity</div><div class="v">${pct(ai.toxicity_score)}</div></div>
+            <div class="ai-bubble"><div class="k">Sentiment</div><div class="v">${esc(ai.sentiment_label||'—')}</div></div>
+          </div>
+          <p style="font-size:.7rem;color:#c8adb0;margin-top:10px;font-style:italic">models: ${ai.models_used.map(esc).join(', ')}</p>
+        ` : '<p class="empty-note">AI models unavailable — pattern-only scoring ♡</p>'}
+      </div>
+      <div class="detail-card">
+        <h3>❀ text stats</h3>
+        ${[['words',st.word_count??'—'],['sentences',st.sentence_count??'—'],['avg word length',((st.avg_word_length)||0).toFixed(1)+' chars'],['credibility score',Math.round(scr)+' / 100']].map(([k,v])=>`<div class="stat-row"><span class="k">${esc(k)}</span><span class="v">${esc(String(v))}</span></div>`).join('')}
+      </div>
+    </div>
+  `;
 
-        function loadSample(type) {
-            if (samples[type]) {
-                document.getElementById('newsInput').value = samples[type];
-            }
-        }
+  requestAnimationFrame(() => {
+    panel.classList.add('visible');
+    panel.querySelectorAll('.conf-fill').forEach(el => { el.style.width = el.dataset.conf + '%'; });
+    panel.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  });
+}
 
-        async function analyzeNews() {
-            const newsText = document.getElementById('newsInput').value.trim();
-            
-            if (!newsText) {
-                alert('Please enter news text to analyze.');
-                return;
-            }
-
-            showLoading(true);
-
-            try {
-                const response = await fetch('/check', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: newsText })
-                });
-
-                const result = await response.json();
-                
-                if (response.ok) {
-                    displayResult(result);
-                } else {
-                    alert(result.error || 'Analysis failed');
-                }
-                
-            } catch (error) {
-                console.error('Analysis error:', error);
-                alert('Connection error. Please try again.');
-            } finally {
-                showLoading(false);
-            }
-        }
-
-        function showLoading(show) {
-            document.getElementById('analyzeBtn').disabled = show;
-            document.getElementById('analyzeBtn').textContent = show ? 'Analyzing...' : '🔍 Analyze News';
-            document.getElementById('loadingSection').style.display = show ? 'block' : 'none';
-            document.getElementById('resultSection').classList.remove('show');
-        }
-
-        function displayResult(result) {
-            const resultSection = document.getElementById('resultSection');
-            const resultIcon = document.getElementById('resultIcon');
-            const resultTitle = document.getElementById('resultTitle');
-            const confidenceText = document.getElementById('confidenceText');
-            const confidenceFill = document.getElementById('confidenceFill');
-            const explanation = document.getElementById('explanation');
-
-            if (result.isReal) {
-                resultSection.className = 'result-section result-credible show';
-                resultIcon.textContent = '✅';
-                resultTitle.textContent = 'CREDIBLE';
-            } else {
-                resultSection.className = 'result-section result-suspicious show';
-                resultIcon.textContent = '❌';
-                resultTitle.textContent = 'SUSPICIOUS';
-            }
-
-            confidenceText.textContent = `${result.confidence}%`;
-            confidenceFill.style.width = `${result.confidence}%`;
-            explanation.textContent = result.explanation || 'Analysis completed';
-        }
-
-        // Keyboard shortcuts
-        document.getElementById('newsInput').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                analyzeNews();
-            }
-        });
-    </script>
+function renderErr(msg) {
+  panel.innerHTML = `<div class="error-card"><span>✗</span><span>${esc(msg)}</span></div>`;
+  requestAnimationFrame(() => panel.classList.add('visible'));
+}
+</script>
 </body>
 </html>
