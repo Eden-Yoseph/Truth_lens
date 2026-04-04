@@ -395,20 +395,20 @@ def bulk_analyze():
         return jsonify({'error': 'Bulk analysis failed'}), 500
 
 if __name__ == '__main__':
-    print("🚀 Starting Enhanced TruthLens AI")
+    print(" Starting Enhanced TruthLens AI")
     print("=" * 60)
     
     if Config.HF_API_TOKEN:
-        print("✅ Hugging Face API token configured")
+        print(" Hugging Face API token configured")
     else:
-        print("⚠️  No Hugging Face API token found")
+        print("  No Hugging Face API token found")
         print("   Get a free token at: https://huggingface.co/settings/tokens")
     
-    print(f"📊 Enhanced analysis with {len(MODELS)} AI models")
-    print(f"🔍 Pattern detection for {sum(len(patterns) for patterns in FAKE_NEWS_PATTERNS.values())} indicators")
-    print("🌐 Server starting at: http://127.0.0.1:5000")
-    print("🧪 Test endpoint: /health")
-    print("📦 Bulk analysis: /analyze/bulk")
+    print(f" Enhanced analysis with {len(MODELS)} AI models")
+    print(f" Pattern detection for {sum(len(patterns) for patterns in FAKE_NEWS_PATTERNS.values())} indicators")
+    print(" Server starting at: http://127.0.0.1:5000")
+    print(" Test endpoint: /health")
+    print(" Bulk analysis: /analyze/bulk")
     print("=" * 60)
     
     app.run(debug=True, host='127.0.0.1', port=5000)
